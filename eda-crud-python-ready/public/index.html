@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EDA CRUD - Event Driven Architecture</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:#17202a}header{background:#17202a;color:white;padding:28px 7%}header h1{margin:0 0 8px}header p{margin:0;color:#d5d8dc}main{width:min(1150px,92%);margin:28px auto}.card{background:#fff;border-radius:12px;padding:20px;margin-bottom:18px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.architecture{display:flex;flex-wrap:wrap;align-items:center;gap:9px}.node{padding:12px;border:2px solid #2e86c1;border-radius:8px;background:#ebf5fb;font-weight:bold}.arrow{font-size:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.status{padding:10px;border-radius:7px;background:#f8f9f9}.ok{color:#1e8449;font-weight:bold}.warn{color:#b9770e;font-weight:bold}form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;margin-bottom:20px}input{padding:11px;border:1px solid #ccd1d1;border-radius:7px}button{border:0;border-radius:7px;padding:10px 14px;background:#2e86c1;color:#fff;cursor:pointer}button.danger{background:#c0392b}button.edit{background:#7d3c98}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid #e5e7e9;text-align:left}.actions{display:flex;gap:6px}.log{background:#17202a;color:#ecf0f1;padding:15px;border-radius:8px;font-family:monospace;min-height:100px;white-space:pre-wrap}.small{font-size:13px;color:#566573}@media(max-width:750px){.grid,form{grid-template-columns:1fr}.architecture{align-items:flex-start}}
+</style>
+</head>
+<body>
+<header><h1>EDA CRUD</h1><p>Arquitectura Basada en Eventos · Python + Flask + MySQL</p></header>
+<main>
+<section class="card"><h2>Flujo de eventos</h2><div class="architecture"><div class="node">Usuario</div><span class="arrow">→</span><div class="node">Flask API<br><small>Producer</small></div><span class="arrow">→</span><div class="node">Event Broker<br><small>queue.Queue</small></div><span class="arrow">→</span><div class="node">UserEventHandler<br><small>Consumer</small></div><span class="arrow">→</span><div class="node">MySQL</div></div><p class="small">Las operaciones Create, Update y Delete publican eventos. El consumidor es quien persiste en MySQL. Read se consulta de forma síncrona.</p></section>
+<section class="grid"><div class="card"><h2>Estado</h2><div id="status" class="status">Consultando...</div></div><div class="card"><h2>Último evento</h2><div id="last" class="status">Ninguno todavía.</div></div></section>
+<section class="card"><h2>Usuarios</h2><form id="form"><input id="nombre" placeholder="Nombre" required><input id="email" type="email" placeholder="Email" required><button id="submit">Crear usuario</button></form><p id="msg"></p><table><thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th>Creado</th><th>Acciones</th></tr></thead><tbody id="rows"></tbody></table></section>
+<section class="card"><h2>Consola conceptual</h2><div id="log" class="log">Esperando eventos...</div></section>
+<section class="card"><h2>Qué demuestra</h2><ol><li>La API actúa como <b>Event Producer</b>.</li><li>El <b>Event Broker</b> desacopla productor y consumidor.</li><li><b>UserEventHandler</b> recibe los eventos de forma asíncrona.</li><li>El handler realiza la persistencia en MySQL.</li><li>La respuesta CUD es <code>202 Accepted</code>, representando procesamiento asíncrono.</li><li>READ consulta MySQL directamente en este prototipo.</li></ol></section>
+</main>
+<script>
+let editingId=null;
+const $=id=>document.getElementById(id);
+async function api(url,opt={}){const r=await fetch(url,opt);const d=await r.json();if(!r.ok)throw new Error(d.error||'Error HTTP');return d}
+function show(msg,ok=true){$('msg').innerHTML='<span class="'+(ok?'ok':'warn')+'">'+msg+'</span>'}
+function escapeHtml(v){return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
+async function load(){try{const users=await api('/users');$('rows').innerHTML=users.length?users.map(u=>`<tr><td>${u.id}</td><td>${escapeHtml(u.nombre)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.creado_en)}</td><td class="actions"><button class="edit" onclick='editUser(${JSON.stringify(u)})'>Editar</button><button class="danger" onclick='deleteUser(${u.id})'>Eliminar</button></td></tr>`).join(''):'<tr><td colspan="5">No hay usuarios.</td></tr>'}catch(e){$('rows').innerHTML='<tr><td colspan="5" class="warn">'+escapeHtml(e.message)+'</td></tr>'}}
+function editUser(u){editingId=u.id;$('nombre').value=u.nombre;$('email').value=u.email;$('submit').textContent='Publicar UserUpdated';window.scrollTo({top:document.querySelector('form').offsetTop-80,behavior:'smooth'})}
+$('form').onsubmit=async e=>{e.preventDefault();const body={nombre:$('nombre').value,email:$('email').value};try{let d;if(editingId){d=await api('/users/'+editingId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('last').innerHTML='<b>UserUpdated</b><br>Evento publicado: '+d.event_id;show('UserUpdated publicado. El Consumer lo procesará asíncronamente.')}else{d=await api('/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('last').innerHTML='<b>UserCreated</b><br>Evento publicado: '+d.event_id;show('UserCreated publicado. El Consumer lo procesará asíncronamente.')}$('form').reset();editingId=null;$('submit').textContent='Crear usuario';appendLog(d.message+' → event_id='+d.event_id);setTimeout(load,250)}catch(err){show(err.message,false)}};
+async function deleteUser(id){if(!confirm('¿Eliminar usuario #'+id+'?'))return;try{const d=await api('/users/'+id,{method:'DELETE'});$('last').innerHTML='<b>UserDeleted</b><br>Evento publicado: '+d.event_id;show('UserDeleted publicado. El Consumer lo procesará asíncronamente.');appendLog(d.message+' → event_id='+d.event_id);setTimeout(load,250)}catch(e){show(e.message,false)}}
+function appendLog(x){const el=$('log');const t=new Date().toLocaleTimeString();el.textContent='['+t+'] '+x+'\n'+el.textContent}
+async function status(){try{const d=await api('/');$('status').innerHTML='<span class="ok">✓ API funcionando</span><br>Broker: '+d.broker+'<br>Eventos: '+d.events.join(', ')}catch(e){$('status').innerHTML='<span class="warn">'+escapeHtml(e.message)+'</span>'}}
+status();load();
+</script>
+</body></html>

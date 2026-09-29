@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Microkernel CRUD - Demostración</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #17202a;
+    }
+    header {
+      background: #17202a;
+      color: white;
+      padding: 28px 7%;
+    }
+    header h1 { margin: 0 0 8px; }
+    header p { margin: 0; color: #d5d8dc; }
+    main { width: min(1150px, 92%); margin: 28px auto; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.07);
+      margin-bottom: 18px;
+    }
+    .architecture {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .node {
+      padding: 12px 15px;
+      border: 2px solid #2e86c1;
+      border-radius: 9px;
+      background: #ebf5fb;
+      font-weight: bold;
+    }
+    .arrow { font-size: 20px; }
+    .ok { color: #1e8449; font-weight: bold; }
+    .warn { color: #b9770e; font-weight: bold; }
+    button {
+      border: 0;
+      border-radius: 7px;
+      padding: 9px 13px;
+      cursor: pointer;
+      background: #2e86c1;
+      color: white;
+    }
+    button.delete { background: #c0392b; }
+    form {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr) auto;
+      gap: 9px;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccd1d1;
+      border-radius: 7px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid #e5e7e9;
+      text-align: left;
+    }
+    code {
+      background: #f0f3f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    .small { font-size: 13px; color: #566573; }
+    @media (max-width: 750px) {
+      form { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Microkernel CRUD</h1>
+  <p>Demostración del patrón arquitectónico basado en plugins</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Flujo de la arquitectura</h2>
+    <div class="architecture">
+      <div class="node">Navegador</div>
+      <div class="arrow">→</div>
+      <div class="node">Express</div>
+      <div class="arrow">→</div>
+      <div class="node">Kernel</div>
+      <div class="arrow">→</div>
+      <div class="node">Productos CRUD</div>
+      <div class="arrow">→</div>
+      <div class="node">MySQL Plugin</div>
+      <div class="arrow">→</div>
+      <div class="node">MySQL</div>
+    </div>
+    <p class="small">
+      El Kernel no conoce la lógica de Productos ni el driver de MySQL.
+      Solo administra plugins, su ciclo de vida y el punto de entrada
+      <code>kernel.execute()</code>.
+    </p>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Kernel</h2>
+      <p id="kernel-status">Consultando...</p>
+    </div>
+    <div class="card">
+      <h2>Plugins</h2>
+      <div id="plugins-status">Consultando...</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. CRUD de Productos</h2>
+    <p class="small">Campos: nombre, precio y stock.</p>
+
+    <form id="product-form">
+      <input id="nombre" placeholder="Nombre" required>
+      <input id="precio" type="number" min="0" step="0.01" placeholder="Precio" required>
+      <input id="stock" type="number" min="0" step="1" placeholder="Stock" required>
+      <button type="submit">Crear producto</button>
+    </form>
+
+    <p id="message"></p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Precio</th>
+          <th>Stock</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody id="products-body"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>3. Para explicar al profesor</h2>
+    <ol>
+      <li><b>PluginInterface:</b> define <code>init()</code>, <code>execute()</code> y <code>destroy()</code>.</li>
+      <li><b>PluginManager:</b> carga dinámicamente los plugins y los registra.</li>
+      <li><b>Kernel:</b> inicializa los plugins y ofrece <code>execute(plugin, action, payload)</code>.</li>
+      <li><b>MySQL Plugin:</b> administra el pool de conexiones.</li>
+      <li><b>Productos CRUD:</b> contiene la lógica de negocio y solicita SQL al plugin MySQL mediante el Kernel.</li>
+      <li><b>Nuevo plugin:</b> se puede agregar mediante la configuración sin modificar el núcleo.</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+async function getJSON(url, options = {}) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Error en la solicitud');
+  }
+  return data;
+}
+
+async function loadStatus() {
+  try {
+    const data = await getJSON('/api/_kernel/status');
+
+    document.getElementById('kernel-status').innerHTML =
+      data.kernel.booted
+        ? '<span class="ok">✓ Kernel iniciado</span>'
+        : '<span class="warn">⚠ Kernel detenido</span>';
+
+    document.getElementById('plugins-status').innerHTML =
+      data.plugins.map(p => {
+        const db = p.database;
+        const dbText = db
+          ? (db.connected
+              ? '<span class="ok">✓ MySQL conectado</span>'
+              : '<span class="warn">⚠ MySQL no disponible</span>')
+          : '';
+
+        return `<p><b>${p.name}</b><br>
+          ${p.initialized ? '<span class="ok">✓ Inicializado</span>' : '<span class="warn">⚠ No inicializado</span>'}
+          ${dbText ? '<br>' + dbText : ''}
+        </p>`;
+      }).join('');
+  } catch (err) {
+    document.getElementById('kernel-status').textContent = err.message;
+  }
+}
+
+async function loadProducts() {
+  const body = document.getElementById('products-body');
+
+  try {
+    const products = await getJSON('/api/productos');
+
+    body.innerHTML = products.map(p => `
+      <tr>
+        <td>${p.id}</td>
+        <td>${escapeHtml(p.nombre)}</td>
+        <td>${Number(p.precio).toFixed(2)}</td>
+        <td>${p.stock}</td>
+        <td>
+          <button class="delete" onclick="deleteProduct(${p.id})">
+            Eliminar
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    if (products.length === 0) {
+      body.innerHTML = '<tr><td colspan="5">No hay productos.</td></tr>';
+    }
+  } catch (err) {
+    body.innerHTML =
+      `<tr><td colspan="5" class="warn">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function deleteProduct(id) {
+  if (!confirm('¿Eliminar el producto #' + id + '?')) return;
+
+  try {
+    await getJSON('/api/productos/' + id, { method: 'DELETE' });
+    document.getElementById('message').innerHTML =
+      '<span class="ok">Producto eliminado.</span>';
+    await loadProducts();
+  } catch (err) {
+    document.getElementById('message').innerHTML =
+      '<span class="warn">' + escapeHtml(err.message) + '</span>';
+  }
+}
+
+document.getElementById('product-form').addEventListener('submit', async event => {
+  event.preventDefault();
+
+  const payload = {
+    nombre: document.getElementById('nombre').value,
+    precio: Number(document.getElementById('precio').value),
+    stock: Number(document.getElementById('stock').value)
+  };
+
+  try {
+    await getJSON('/api/productos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    document.getElementById('message').innerHTML =
+      '<span class="ok">Producto creado correctamente.</span>';
+
+    event.target.reset();
+    await loadProducts();
+    await loadStatus();
+  } catch (err) {
+    document.getElementById('message').innerHTML =
+      '<span class="warn">' + escapeHtml(err.message) + '</span>';
+  }
+});
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+loadStatus();
+loadProducts();
+</script>
+</body>
+</html>
