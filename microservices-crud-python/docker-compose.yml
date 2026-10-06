@@ -1,0 +1,74 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: microservices-mysql
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: Sarita2023
+      MYSQL_DATABASE: microservices_crud
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: docker123
+
+    ports:
+      - "3307:3306"
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  user-service:
+    build:
+      context: ./user-service
+
+    container_name: user-service
+    restart: unless-stopped
+
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: microservices_crud
+      DB_USER: app_user
+      DB_PASSWORD: docker123
+
+    ports:
+      - "8001:8000"
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  query-service:
+    build:
+      context: ./query-service
+
+    container_name: query-service
+    restart: unless-stopped
+
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: microservices_crud
+      DB_USER: app_user
+      DB_PASSWORD: docker123
+
+    ports:
+      - "8002:8000"
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
